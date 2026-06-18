@@ -1,0 +1,60 @@
+---
+# =============================================================================
+# firmware_targets.yml — Desired Firmware End State (Data Model)
+# =============================================================================
+# Defines the target firmware version for each combination of Meraki
+# organization, network tag, and device family. Playbook 2.0 reads this
+# file and enforces compliance — it upgrades any device type that does not
+# already match the target version, and skips those that do.
+#
+# Run playbook 1.0 to discover the version IDs available for your networks,
+# then populate the version IDs below.
+#
+# Schema reference:
+#   firmware_policies:            — list of policy entries (processed top-to-bottom)
+#     - description: string       — human-readable label shown in playbook output
+#       organization: string      — Meraki org name, or "all" to match any org
+#       network_tag: string       — single Meraki network tag (case-sensitive)
+#       upgrade_datetime: string  — ISO 8601 UTC e.g. 2026-07-01T02:00:00Z
+#                                   empty string "" = next configured maintenance window
+#       upgrade_strategy: string  — optional; controls reboot behaviour:
+#                                   "minimizeClientDowntime" (default) — waits for
+#                                     client activity to drop before rebooting
+#                                   "minimizeUpgradeTime" — reboots immediately at
+#                                     the scheduled time regardless of clients
+#                                   omit or leave empty to use Meraki default
+#       target:
+#         appliance_version_id: string  — MX target version ID (empty = do not touch)
+#         switch_version_id: string     — MS target version ID (empty = do not touch)
+#         wireless_version_id: string   — MR target version ID (empty = do not touch)
+#
+# Notes:
+#   - A network that carries multiple matching tags will have all matching
+#     policies applied. If two policies target the same device type on the
+#     same network, the last policy in this file wins.
+#   - Device families omitted or set to "" are never touched.
+#   - Version IDs are strings (quote them) — copy from playbook 1.0 output.
+# =============================================================================
+
+firmware_policies:
+
+  - description: "Cisco-Lab — all device families stable firmware"
+    organization: "Igor M"     # Meraki org name, or "all" for any org
+    network_tag: "Cisco-Lab"   # case-sensitive; must match Meraki Dashboard tag
+    upgrade_datetime: ""       # "" = next configured maintenance window; or ISO 8601 UTC: 2026-07-01T02:00:00Z
+    upgrade_strategy: "minimizeClientDowntime"  # or "minimizeUpgradeTime" to reboot immediately
+    target:
+      appliance_version_id: "15806"   # MX 19.2.8  [stable]  — from playbook 1.0
+      switch_version_id: "6016"       # MS 17.2.2  [stable]  — from playbook 1.0
+      wireless_version_id: "15763"    # MR 32.1.7  [stable]  — from playbook 1.0
+
+  # Example: wireless-only policy targeting a different tag across all orgs
+  # - description: "FTD networks — wireless upgrade only"
+  #   organization: "all"
+  #   network_tag: "FTD"
+  #   upgrade_datetime: "2026-08-01T03:00:00Z"
+  #   upgrade_strategy: "minimizeUpgradeTime"   # reboot immediately at scheduled time
+  #   target:
+  #     appliance_version_id: ""
+  #     switch_version_id: ""
+  #     wireless_version_id: "15763"   # MR 32.1.7 [stable]

@@ -1,0 +1,343 @@
+---
+# =============================================================================
+# 2.0 - Schedule Firmware Upgrade for Meraki Networks (Data Model Driven)
+# =============================================================================
+# Reads data-model/firmware_targets.yml to determine the desired firmware end
+# state, then enforces compliance across all matching networks.
+#
+# For each policy in the data model the playbook:
+#   1. Finds all networks in the specified organization whose tags include
+#      the policy's network_tag.
+#   2. Compares the current firmware version of each device family against
+#      the policy target.
+#   3. Schedules an upgrade only where current != target (idempotent).
+#      Device families with an empty target version_id are never touched.
+#
+# Prerequisites:
+#   Run playbook 1.0 to discover available version IDs, then populate
+#   data-model/firmware_targets.yml with the desired target versions.
+#
+# Usage:
+#   ansible-playbook ansible/2.0_schedule_firmware_upgrade_by_tag.yml
+#
+# Dry-run — show compliance plan without making any changes:
+#   ansible-playbook ansible/2.0_schedule_firmware_upgrade_by_tag.yml --check
+# =============================================================================
+
+- name: "2.0 - Schedule Firmware Upgrade for Meraki Networks (Data Model Driven)"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    firmware_targets_file: "{{ playbook_dir }}/../data-model/firmware_targets.yml"
+
+  pre_tasks:
+
+    - name: Load firmware targets data model
+      ansible.builtin.set_fact:
+        firmware_policies: "{{ (lookup('file', firmware_targets_file) | from_yaml).firmware_policies }}"
+
+    - name: Validate - data model has at least one policy
+      ansible.builtin.assert:
+        that:
+          - firmware_policies | length > 0
+        fail_msg: >-
+          No firmware_policies found in {{ firmware_targets_file }}.
+          Add at least one policy entry and re-run.
+
+    - name: Validate - each policy has at least one non-empty target version ID
+      ansible.builtin.assert:
+        that:
+          - (item.target.appliance_version_id | default('')) != ''
+            or (item.target.switch_version_id | default('')) != ''
+            or (item.target.wireless_version_id | default('')) != ''
+        fail_msg: >-
+          Policy "{{ item.description }}" has no target version IDs set.
+          Set at least one of appliance_version_id, switch_version_id,
+          or wireless_version_id in {{ firmware_targets_file }}.
+      loop: "{{ firmware_policies }}"
+      loop_control:
+        label: "{{ item.description }}"
+
+    - name: Validate - upgrade_datetime format in each policy
+      ansible.builtin.assert:
+        that:
+          - item.upgrade_datetime | regex_search('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$') is not none
+        fail_msg: >-
+          Policy "{{ item.description }}": upgrade_datetime must be ISO 8601 UTC
+          format YYYY-MM-DDTHH:MM:SSZ, e.g. 2026-07-01T02:00:00Z
+          (got "{{ item.upgrade_datetime }}").
+      loop: "{{ firmware_policies }}"
+      loop_control:
+        label: "{{ item.description }}"
+      when: item.upgrade_datetime | default('') != ''
+
+    - name: Show loaded policies
+      ansible.builtin.debug:
+        msg: >-
+          Loaded {{ firmware_policies | length }} firmware policy/policies
+          from {{ firmware_targets_file }}:
+          {{ firmware_policies | map(attribute='description') | list }}
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # Step 1 — Discover all organizations accessible by this API key
+    # -------------------------------------------------------------------------
+    - name: Get all Meraki organizations
+      cisco.meraki.organizations_info:
+        meraki_api_key: "{{ meraki_api_key }}"
+        meraki_base_url: "{{ meraki_base_url }}"
+      register: org_result
+
+    - name: Set fact - meraki_orgs
+      ansible.builtin.set_fact:
+        meraki_orgs: "{{ org_result.meraki_response }}"
+
+    - name: Show discovered organizations
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ meraki_orgs | length }} organization(s):
+          {{ meraki_orgs | map(attribute='name') | list }}
+
+    # -------------------------------------------------------------------------
+    # Step 2 — Get all networks for each organization
+    # -------------------------------------------------------------------------
+    - name: Get all networks for each organization
+      cisco.meraki.networks_info:
+        meraki_api_key: "{{ meraki_api_key }}"
+        meraki_base_url: "{{ meraki_base_url }}"
+        organizationId: "{{ item.id }}"
+      loop: "{{ meraki_orgs }}"
+      loop_control:
+        label: "Org: {{ item.name }}"
+      register: networks_result
+
+    - name: Flatten all networks across all organizations
+      ansible.builtin.set_fact:
+        all_networks: "{{ networks_result.results | map(attribute='meraki_response') | flatten }}"
+
+    # -------------------------------------------------------------------------
+    # Step 3 — Match networks to policies
+    #
+    # A "policy" is one entry in firmware_targets.yml — it declares the desired
+    # firmware end state for a specific combination of org + network tag + device
+    # families. Example: "upgrade all MX/MS/MR in org 'Igor M' tagged 'Cisco-Lab'
+    # to these version IDs, at this time, with this reboot strategy."
+    #
+    # This step builds a flat work list of every (network, policy) pair where:
+    #   - the network's tag list contains the policy's network_tag, AND
+    #   - the network belongs to the policy's organization (or policy says "all")
+    #
+    # One network can match multiple policies (e.g. different tags). One policy
+    # can match multiple networks. The result is a flat list of pairs — each pair
+    # is processed independently for compliance in Step 5.
+    #
+    # Example — given 2 networks and 2 policies:
+    #   Networks : "Meraki Core" (tags: Cisco-Lab), "Branch-01" (tags: Cisco-Lab, FTD)
+    #   Policies : policy-A (tag: Cisco-Lab), policy-B (tag: FTD)
+    #
+    #   Resulting work_list:
+    #   - { networkName: "Meraki Core", policy: policy-A }   ← Cisco-Lab match
+    #   - { networkName: "Branch-01",  policy: policy-A }   ← Cisco-Lab match
+    #   - { networkName: "Branch-01",  policy: policy-B }   ← FTD match
+    #                                                          (Branch-01 appears twice,
+    #                                                           once per matching policy)
+    # -------------------------------------------------------------------------
+    - name: Build network-policy work list
+      ansible.builtin.set_fact:
+        work_list: >-
+          {%- set result = [] -%}
+          {%- for network in all_networks -%}
+            {%- set org_name = (meraki_orgs | selectattr('id', 'equalto', network.organizationId) | first).name -%}
+            {%- for policy in firmware_policies -%}
+              {%- if policy.network_tag in (network.tags | default([])) -%}
+                {%- if policy.organization == 'all' or policy.organization == org_name -%}
+                  {%- set _ = result.append({
+                    'networkId': network.id,
+                    'networkName': network.name,
+                    'orgName': org_name,
+                    'policy': policy
+                  }) -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endfor -%}
+          {{ result }}
+
+    - name: Fail if no networks matched any policy
+      ansible.builtin.fail:
+        msg: >-
+          No networks matched any policy in {{ firmware_targets_file }}.
+          Check that organization names and network tags are correct
+          (both are case-sensitive).
+      when: work_list | length == 0
+
+    - name: Show policy matches
+      ansible.builtin.debug:
+        msg: >-
+          {{ work_list | length }} network-policy match(es) found:
+          {{ work_list | map(attribute='networkName') | list }}
+
+    # -------------------------------------------------------------------------
+    # Step 4 — Get current firmware for every unique matched network
+    # -------------------------------------------------------------------------
+    - name: Get firmware info for each matched network
+      cisco.meraki.networks_firmware_upgrades_info:
+        meraki_api_key: "{{ meraki_api_key }}"
+        meraki_base_url: "{{ meraki_base_url }}"
+        networkId: "{{ item }}"
+      loop: "{{ work_list | map(attribute='networkId') | unique | list }}"
+      loop_control:
+        label: "Network ID: {{ item }}"
+      register: firmware_result
+
+    - name: Build firmware info lookup by network ID
+      ansible.builtin.set_fact:
+        firmware_by_network: >-
+          {%- set d = {} -%}
+          {%- for r in firmware_result.results -%}
+            {%- set _ = d.update({r.item: r.meraki_response}) -%}
+          {%- endfor -%}
+          {{ d }}
+
+    # -------------------------------------------------------------------------
+    # Step 5 — Evaluate compliance for each network-policy pair
+    # -------------------------------------------------------------------------
+    - name: Evaluate compliance for each network-policy pair
+      ansible.builtin.set_fact:
+        compliance_list: "{{ (compliance_list | default([])) + [entry] }}"
+      vars:
+        fw: "{{ firmware_by_network[item.networkId].products }}"
+        target_ap: "{{ item.policy.target.appliance_version_id | default('') | string }}"
+        target_sw: "{{ item.policy.target.switch_version_id | default('') | string }}"
+        target_wr: "{{ item.policy.target.wireless_version_id | default('') | string }}"
+        cur_ap: "{{ fw.appliance.currentVersion.id | default('') | string }}"
+        cur_sw: "{{ fw.switch.currentVersion.id | default('') | string }}"
+        cur_wr: "{{ fw.wireless.currentVersion.id | default('') | string }}"
+        upg_ap: "{{ target_ap != '' and cur_ap != target_ap }}"
+        upg_sw: "{{ target_sw != '' and cur_sw != target_sw }}"
+        upg_wr: "{{ target_wr != '' and cur_wr != target_wr }}"
+        upgrade_dt: "{{ item.policy.upgrade_datetime | default('') }}"
+        upgrade_strategy: "{{ item.policy.upgrade_strategy | default('') }}"
+        products_dict: >-
+          {{
+            ({} if not upg_ap | bool else
+              {'appliance': ({'upgradeStrategy': upgrade_strategy} if upgrade_strategy != '' else {})
+                | combine({'nextUpgrade': {
+                    'time': upgrade_dt,
+                    'toVersion': {'id': target_ap}
+                  }})})
+            | combine({} if not upg_sw | bool else
+              {'switch': ({'upgradeStrategy': upgrade_strategy} if upgrade_strategy != '' else {})
+                | combine({'nextUpgrade': {
+                    'time': upgrade_dt,
+                    'toVersion': {'id': target_sw}
+                  }})})
+            | combine({} if not upg_wr | bool else
+              {'wireless': ({'upgradeStrategy': upgrade_strategy} if upgrade_strategy != '' else {})
+                | combine({'nextUpgrade': {
+                    'time': upgrade_dt,
+                    'toVersion': {'id': target_wr}
+                  }})})
+          }}
+        entry:
+          networkId: "{{ item.networkId }}"
+          networkName: "{{ item.networkName }}"
+          orgName: "{{ item.orgName }}"
+          policyDescription: "{{ item.policy.description }}"
+          any_upgrade_needed: "{{ upg_ap | bool or upg_sw | bool or upg_wr | bool }}"
+          needs_appliance: "{{ upg_ap | bool }}"
+          needs_switch: "{{ upg_sw | bool }}"
+          needs_wireless: "{{ upg_wr | bool }}"
+          products: "{{ products_dict }}"
+          current_appliance: "{{ fw.appliance.currentVersion.shortName | default('N/A') }} (ID: {{ cur_ap }})"
+          current_switch: "{{ fw.switch.currentVersion.shortName | default('N/A') }} (ID: {{ cur_sw }})"
+          current_wireless: "{{ fw.wireless.currentVersion.shortName | default('N/A') }} (ID: {{ cur_wr }})"
+          target_appliance_id: "{{ target_ap }}"
+          target_switch_id: "{{ target_sw }}"
+          target_wireless_id: "{{ target_wr }}"
+          upgrade_datetime: "{{ upgrade_dt }}"
+          upgrade_strategy: "{{ upgrade_strategy }}"
+      loop: "{{ work_list }}"
+      loop_control:
+        label: "{{ item.networkName }} — {{ item.policy.description }}"
+
+    - name: Ensure compliance_list is defined
+      ansible.builtin.set_fact:
+        compliance_list: "{{ compliance_list | default([]) }}"
+
+    # -------------------------------------------------------------------------
+    # Step 6 — Display compliance plan before applying any changes
+    # -------------------------------------------------------------------------
+    - name: "Show compliance plan: {{ item.networkName }} — {{ item.policyDescription }}"
+      ansible.builtin.debug:
+        msg: |-
+          ───────────────────────────────────────────────────────────────
+          Network : {{ item.networkName }}
+          Org     : {{ item.orgName }}
+          Policy  : {{ item.policyDescription }}
+          {% if item.any_upgrade_needed | bool -%}
+          Action  : UPGRADE WILL BE SCHEDULED
+          {% if item.needs_appliance | bool -%}
+            Appliance : {{ item.current_appliance }} → target ID: {{ item.target_appliance_id }}
+          {% endif -%}
+          {% if item.needs_switch | bool -%}
+            Switch    : {{ item.current_switch }} → target ID: {{ item.target_switch_id }}
+          {% endif -%}
+          {% if item.needs_wireless | bool -%}
+            Wireless  : {{ item.current_wireless }} → target ID: {{ item.target_wireless_id }}
+          {% endif -%}
+          Scheduled : {{ item.upgrade_datetime if item.upgrade_datetime != '' else 'Next maintenance window (upgrade_datetime not set)' }}
+          Strategy  : {{ item.upgrade_strategy if item.upgrade_strategy != '' else 'minimizeClientDowntime (Meraki default)' }}
+          {% else -%}
+          Action  : COMPLIANT — already on target version for all specified device types
+          {% endif -%}
+          ───────────────────────────────────────────────────────────────
+      loop: "{{ compliance_list }}"
+      loop_control:
+        label: "{{ item.networkName }} — {{ item.policyDescription }}"
+
+    # -------------------------------------------------------------------------
+    # Step 7 — Schedule upgrades for non-compliant networks
+    # -------------------------------------------------------------------------
+    # Example products payload:
+    # {
+    #   "appliance": {
+    #     "nextUpgrade": {
+    #       "time": "2026-07-01T02:00:00Z",
+    #       "toVersion": {"id": "17.3.1"}
+    #     },
+    #     "upgradeStrategy": "minimizeClientDowntime"
+    #   },
+    #   "switch": {...},
+    #   "wireless": {...}
+    # }
+    - name: "Schedule firmware upgrade: {{ item.networkName }} — {{ item.policyDescription }}"
+      cisco.meraki.networks_firmware_upgrades:
+        meraki_api_key: "{{ meraki_api_key }}"
+        meraki_base_url: "{{ meraki_base_url }}"
+        networkId: "{{ item.networkId }}"
+        state: present
+        products: "{{ item.products }}"
+      loop: "{{ compliance_list }}"
+      loop_control:
+        label: "{{ item.networkName }} — {{ item.policyDescription }}"
+      when: item.any_upgrade_needed | bool
+      register: schedule_result
+
+    # -------------------------------------------------------------------------
+    # Step 8 — Summary
+    # -------------------------------------------------------------------------
+    - name: Compliance enforcement summary
+      ansible.builtin.debug:
+        msg: |-
+          ═══════════════════════════════════════════════════════════════
+          COMPLIANCE SUMMARY
+          ═══════════════════════════════════════════════════════════════
+          Policies evaluated   : {{ firmware_policies | length }}
+          Network-policy pairs : {{ compliance_list | length }}
+          Upgrades scheduled   : {{ compliance_list | selectattr('any_upgrade_needed') | list | length }}
+          Already compliant    : {{ compliance_list | rejectattr('any_upgrade_needed') | list | length }}
+          ═══════════════════════════════════════════════════════════════

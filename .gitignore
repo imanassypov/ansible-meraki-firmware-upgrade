@@ -1,0 +1,24 @@
+# Ansible vault password file — NEVER commit this
+.vault_pass
+
+# direnv — contains API keys and local env overrides
+.envrc
+
+# Python virtualenvs
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/settings.json
+*.swp
+
+# Nested repos — tracked separately
+nac-meraki-simple-example/

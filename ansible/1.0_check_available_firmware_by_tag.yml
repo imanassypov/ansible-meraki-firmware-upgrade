@@ -1,0 +1,179 @@
+---
+# =============================================================================
+# 1.0 - Check Available Firmware for Meraki Networks by Tag
+# =============================================================================
+# Discovers all Meraki networks matching the given tags across every
+# organization the API key has access to, then displays current and available
+# firmware versions (ID + shortName) for Appliance (MX), Switch (MS), and
+# Wireless (MR) — the three device types accepted by playbook 2.0.
+#
+# The version IDs shown in the output are the exact values to pass as
+# appliance_version_id, switch_version_id, and wireless_version_id in 2.0.
+#
+# Usage:
+#   ansible-playbook ansible/1.0_check_available_firmware_by_tag.yml \
+#     -i ansible/inventory/meraki.yml \
+#     -e '{"network_tags": ["Cisco-Lab"]}' \
+#     --vault-password-file .vault_pass
+#
+# Multiple tags (networks matching ANY tag are included):
+#   -e '{"network_tags": ["branch", "remote-office"]}'
+#
+# Note: use JSON dict format (-e '{"key": ["val"]}') for list variables.
+#       The key=value form (-e 'key=["val"]') passes a string, not a list.
+# =============================================================================
+
+- name: "1.0 - Check Available Firmware for Meraki Networks by Tag"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Read from MERAKI_NETWORK_TAGS env var (set automatically by direnv via .envrc).
+    # Override at runtime with: -e '{"network_tags": ["other-tag"]}'
+    # Format in .envrc: export MERAKI_NETWORK_TAGS=Cisco-Lab
+    # Multiple tags:    export MERAKI_NETWORK_TAGS=Cisco-Lab,branch
+    network_tags: >-
+      {{ lookup('env', 'MERAKI_NETWORK_TAGS')
+         | split(',')
+         | map('trim')
+         | select
+         | list }}
+
+  pre_tasks:
+    - name: Validate - network_tags must be a non-empty list
+      ansible.builtin.assert:
+        that:
+          - network_tags | length > 0
+        fail_msg: >-
+          network_tags is empty. Set the MERAKI_NETWORK_TAGS environment variable in .envrc
+          (e.g. export MERAKI_NETWORK_TAGS=Cisco-Lab) and run 'direnv allow', or pass
+          -e '{"network_tags": ["your-tag"]}' on the command line.
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # Step 1 — Discover all Meraki organizations accessible by this API key
+    # -------------------------------------------------------------------------
+    - name: Get all Meraki organizations
+      cisco.meraki.organizations_info:
+        meraki_api_key: "{{ meraki_api_key }}"
+        meraki_base_url: "{{ meraki_base_url }}"
+      register: org_result
+
+    - name: Set fact - meraki_orgs
+      ansible.builtin.set_fact:
+        meraki_orgs: "{{ org_result.meraki_response }}"
+
+    - name: Show discovered organizations
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ meraki_orgs | length }} organization(s):
+          {{ meraki_orgs | map(attribute='name') | list }}
+
+    # -------------------------------------------------------------------------
+    # Step 2 — Get all networks for each organization
+    # -------------------------------------------------------------------------
+    - name: Get all networks for each organization
+      cisco.meraki.networks_info:
+        meraki_api_key: "{{ meraki_api_key }}"
+        meraki_base_url: "{{ meraki_base_url }}"
+        organizationId: "{{ item.id }}"
+      loop: "{{ meraki_orgs }}"
+      loop_control:
+        label: "Org: {{ item.name }}"
+      register: networks_result
+
+    - name: Flatten all networks across all organizations
+      ansible.builtin.set_fact:
+        all_networks: "{{ networks_result.results | map(attribute='meraki_response') | flatten }}"
+
+    - name: Show total networks discovered
+      ansible.builtin.debug:
+        msg: "Discovered {{ all_networks | length }} total network(s) across all organizations."
+
+    # -------------------------------------------------------------------------
+    # Step 3 — Filter networks that have any of the requested tags
+    # -------------------------------------------------------------------------
+    - name: Filter networks matching any specified tag
+      ansible.builtin.set_fact:
+        tagged_networks: "{{ (tagged_networks | default([])) + [item] }}"
+      loop: "{{ all_networks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.tags is defined and (item.tags | intersect(network_tags) | length > 0)
+
+    - name: Ensure tagged_networks is defined (no matches case)
+      ansible.builtin.set_fact:
+        tagged_networks: "{{ tagged_networks | default([]) }}"
+
+    - name: Fail if no networks match the given tags
+      ansible.builtin.fail:
+        msg: >-
+          No networks found matching tags {{ network_tags }}.
+          Tag matching is case-sensitive. Verify tags exist in the Meraki Dashboard.
+      when: tagged_networks | length == 0
+
+    - name: Show networks matching the tags
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ tagged_networks | length }} network(s) matching tags {{ network_tags }}:
+          {{ tagged_networks | map(attribute='name') | list }}
+
+    # -------------------------------------------------------------------------
+    # Step 4 — Query firmware upgrade info for each matching network
+    # -------------------------------------------------------------------------
+    - name: Get firmware upgrade info for each network
+      cisco.meraki.networks_firmware_upgrades_info:
+        meraki_api_key: "{{ meraki_api_key }}"
+        meraki_base_url: "{{ meraki_base_url }}"
+        networkId: "{{ item.id }}"
+      loop: "{{ tagged_networks }}"
+      loop_control:
+        label: "Network: {{ item.name }}"
+      register: firmware_result
+
+    # -------------------------------------------------------------------------
+    # Step 5 — Display firmware summary per network
+    # -------------------------------------------------------------------------
+    - name: "Display firmware info for {{ item.item.name }}"
+      ansible.builtin.debug:
+        msg: |-
+          ═══════════════════════════════════════════════════════════════
+          Network : {{ item.item.name }}
+          Org     : {{ (meraki_orgs | selectattr('id', 'equalto', item.item.organizationId) | first).name }}
+          Tags    : {{ item.item.tags | default([]) | join(', ') }}
+          ───────────────────────────────────────────────────────────────
+          APPLIANCE (MX)
+          {% set ap = item.meraki_response.products.appliance | default({}) -%}
+            Current   : {{ ap.currentVersion.shortName | default('N/A') }} (ID: {{ ap.currentVersion.id | default('N/A') }})
+            Available :
+          {% for v in ap.availableVersions | default([]) -%}
+              - {{ v.shortName }} [{{ v.releaseType }}]  →  ID: {{ v.id }}
+          {% else -%}
+              (none reported)
+          {% endfor -%}
+          ───────────────────────────────────────────────────────────────
+          SWITCH (MS)
+          {% set sw = item.meraki_response.products.switch | default({}) -%}
+            Current   : {{ sw.currentVersion.shortName | default('N/A') }} (ID: {{ sw.currentVersion.id | default('N/A') }})
+            Available :
+          {% for v in sw.availableVersions | default([]) -%}
+              - {{ v.shortName }} [{{ v.releaseType }}]  →  ID: {{ v.id }}
+          {% else -%}
+              (none reported)
+          {% endfor -%}
+          ───────────────────────────────────────────────────────────────
+          WIRELESS (MR)
+          {% set wr = item.meraki_response.products.wireless | default({}) -%}
+            Current   : {{ wr.currentVersion.shortName | default('N/A') }} (ID: {{ wr.currentVersion.id | default('N/A') }})
+            Available :
+          {% for v in wr.availableVersions | default([]) -%}
+              - {{ v.shortName }} [{{ v.releaseType }}]  →  ID: {{ v.id }}
+          {% else -%}
+              (none reported)
+          {% endfor -%}
+          ═══════════════════════════════════════════════════════════════
+      loop: "{{ firmware_result.results }}"
+      loop_control:
+        label: "Network: {{ item.item.name }}"

@@ -1,0 +1,18 @@
+Output - Appliance - Available Firmware Versions
+String
+Output
+
+{ "availableVersions": [ { "id": "15806", "releaseType": "stable", "shortName": "MX 19.2.8" }, { "id": "15572", "releaseType": "candidate", "shortName": "MX 26.1.4" } ] }
+
+
+Output - Switch - Available Firmware Versions
+String
+Output
+
+{ "availableVersions": [ { "id": "6016", "releaseType": "stable", "shortName": "MS 17.2.2" }, { "id": "17783", "releaseType": "candidate", "shortName": "MS 18.1.7.1" } ] }
+
+Output - Wireless - Available Firmware Versions
+String
+Output
+
+{ "availableVersions": [ { "id": "15763", "releaseType": "stable", "shortName": "MR 32.1.7" }, { "id": "13875", "releaseType": "candidate", "shortName": "MR 32.2.3" } ] }

@@ -1,0 +1,9 @@
+---
+# Meraki Dashboard API base URL.
+# Override with -e meraki_base_url=https://... if using a proxy or private instance.
+meraki_base_url: "https://api.meraki.com/api/v1"
+
+# meraki_api_key is loaded from vault.yml (encrypted).
+# It can also be set via the MERAKI_DASHBOARD_API_KEY environment variable
+# to avoid storing it at all:
+#   export MERAKI_DASHBOARD_API_KEY=your-key-here

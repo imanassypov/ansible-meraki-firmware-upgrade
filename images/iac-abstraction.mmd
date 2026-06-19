@@ -1,0 +1,55 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1B4F72', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#154360', 'lineColor': '#2E86C1', 'secondaryColor': '#2E86C1', 'tertiaryColor': '#EBF5FB', 'fontSize': '16px', 'fontFamily': 'Segoe UI, Arial, sans-serif'}}}%%
+flowchart TB
+    classDef intentLayer fill:#1B4F72,stroke:#154360,color:#FFFFFF,rx:8
+    classDef toolLayer fill:#1A5276,stroke:#154360,color:#FFFFFF,rx:8
+    classDef apiLayer fill:#117A65,stroke:#0E6655,color:#FFFFFF,rx:8
+    classDef deviceLayer fill:#784212,stroke:#6E2F1A,color:#FFFFFF,rx:8
+    classDef layerLabel fill:#EBF5FB,stroke:#AED6F1,color:#1B4F72,rx:4
+    classDef arrowNote fill:#FEF9E7,stroke:#F9E79F,color:#7D6608,rx:4
+
+    L1["🧑‍💻  LAYER 1 — Human Intent\nWhat you want the network to look like"]:::layerLabel
+
+    subgraph INTENT["  Declare Intent (What, not How)  "]
+        PY["Python Script\n1.0_check_firmware.py\n2.0_schedule_upgrade.py"]:::intentLayer
+        ANS["Ansible Playbook\n1.0_check_firmware.yml\n2.0_schedule_upgrade.yml"]:::intentLayer
+        NAC["Network as Code\ndata-model/nac/*.yaml\n→  terraform apply"]:::intentLayer
+    end
+
+    L2["⚙️  LAYER 2 — Automation Engine\nTranslates intent into API calls"]:::layerLabel
+
+    subgraph ENGINE["  Automation Engines  "]
+        SDK["Meraki Python SDK\nmeraki.DashboardAPI()"]:::toolLayer
+        ACOL["cisco.meraki\nAnsible Collection\nGalaxy modules"]:::toolLayer
+        TF["Terraform\nnetascode/nac-meraki\nCiscoDevNet/meraki provider"]:::toolLayer
+    end
+
+    L3["🌐  LAYER 3 — Meraki Dashboard API\nSingle source of truth"]:::layerLabel
+
+    subgraph API["  Meraki Dashboard REST API (api.meraki.com)  "]
+        EP1["GET /organizations/{id}/networks\nDiscover networks by tag"]:::apiLayer
+        EP2["GET /networks/{id}/firmwareUpgrades\nRead current firmware state"]:::apiLayer
+        EP3["PUT /networks/{id}/firmwareUpgrades\nSchedule upgrade"]:::apiLayer
+        EP4["PUT /networks/{id}/wireless/ssids/{n}\nConfigure SSID + PSK"]:::apiLayer
+    end
+
+    L4["📡  LAYER 4 — Physical Infrastructure\nDevices in the field"]:::layerLabel
+
+    subgraph DEVICES["  Meraki Cloud-Managed Devices  "]
+        MX["MX Security\nAppliance"]:::deviceLayer
+        MS["MS Network\nSwitch"]:::deviceLayer
+        MR["MR Wireless\nAccess Point"]:::deviceLayer
+    end
+
+    L1 --> INTENT
+    INTENT --> L2
+    L2 --> ENGINE
+    PY  --> SDK
+    ANS --> ACOL
+    NAC --> TF
+    ENGINE --> L3
+    SDK  --> EP1 & EP2 & EP3
+    ACOL --> EP1 & EP2 & EP3
+    TF   --> EP1 & EP4
+    L3 --> API
+    API --> L4
+    EP1 & EP2 & EP3 & EP4 --> DEVICES

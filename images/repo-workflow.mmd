@@ -1,0 +1,21 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1B4F72', 'primaryTextColor': '#FFFFFF', 'lineColor': '#2E86C1', 'fontSize': '15px', 'fontFamily': 'Segoe UI, Arial, sans-serif'}}}%%
+flowchart LR
+    classDef dataModel fill:#1A5276,stroke:#154360,color:#FFFFFF,rx:6
+    classDef tool fill:#117A65,stroke:#0E6655,color:#FFFFFF,rx:6
+    classDef api fill:#784212,stroke:#6E2F1A,color:#FFFFFF,rx:6
+    classDef shared fill:#6C3483,stroke:#5B2C6F,color:#FFFFFF,rx:6
+
+    DM_F["📄 data-model/firmware/\nfirmware_targets.yaml\n\nDesired firmware state\nper network + device family"]:::dataModel
+    DM_N["📄 data-model/nac/\nnetworks_nac.yaml\ndefaults_nac.yaml\n\nDesired SSID + PSK state"]:::dataModel
+
+    PY1["🐍 python/1.0\nCheck firmware\n(read-only)"]:::tool
+    PY2["🐍 python/2.0\nSchedule upgrade\n(idempotent)"]:::tool
+    ANS1["📋 ansible/1.0\nCheck firmware\n(read-only)"]:::tool
+    ANS2["📋 ansible/2.0\nSchedule upgrade\n(idempotent)"]:::tool
+    TF["⬛ terraform apply\nNaC module\nSSID + PSK"]:::tool
+
+    API["🌐 Meraki Dashboard API\napi.meraki.com"]:::api
+
+    DM_F --> PY1 & PY2 & ANS1 & ANS2
+    DM_N --> TF
+    PY1 & PY2 & ANS1 & ANS2 & TF --> API

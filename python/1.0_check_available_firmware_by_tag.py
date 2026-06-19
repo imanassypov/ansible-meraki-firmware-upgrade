@@ -20,12 +20,20 @@ Optional overrides
 
 Usage
 -----
-    # Pass tags on the command line:
+    # Auto-derive tags from data-model/firmware_targets.yml (recommended):
+    python python/1.0_check_available_firmware_by_tag.py
+
+    # Override tags explicitly on the command line:
     python python/1.0_check_available_firmware_by_tag.py --tags Cisco-Lab
     python python/1.0_check_available_firmware_by_tag.py --tags Cisco-Lab branch
 
-    # Or via environment variable (comma-separated):
+    # Fallback: via environment variable (comma-separated):
     MERAKI_NETWORK_TAGS=Cisco-Lab python python/1.0_check_available_firmware_by_tag.py
+
+Tag resolution priority:
+    1. --tags CLI flag
+    2. network_tag fields in data-model/firmware_targets.yml  (auto, no flag needed)
+    3. MERAKI_NETWORK_TAGS environment variable
 
 Mirrors: ansible/1.0_check_available_firmware_by_tag.yml
 """
@@ -33,17 +41,38 @@ Mirrors: ansible/1.0_check_available_firmware_by_tag.yml
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import meraki
+import yaml
 
 
 SEPARATOR = "═" * 65
 SUB_SEP   = "─" * 65
 
+DEFAULT_TARGETS_FILE = (
+    Path(__file__).resolve().parent.parent / "data-model" / "firmware_targets.yml"
+)
+
 
 # ---------------------------------------------------------------------------
 # CLI and environment
 # ---------------------------------------------------------------------------
+
+def _tags_from_data_model(targets_file: Path) -> list[str]:
+    """Return the unique set of network_tag values from firmware_targets.yml."""
+    if not targets_file.exists():
+        return []
+    with open(targets_file) as fh:
+        data = yaml.safe_load(fh)
+    policies = (data or {}).get("firmware_policies") or []
+    seen: list[str] = []
+    for p in policies:
+        tag = str(p.get("network_tag") or "").strip()
+        if tag and tag not in seen:
+            seen.append(tag)
+    return seen
+
 
 def parse_args() -> list[str]:
     parser = argparse.ArgumentParser(
@@ -57,20 +86,38 @@ def parse_args() -> list[str]:
         metavar="TAG",
         help=(
             "One or more network tags to filter by (case-sensitive). "
-            "Falls back to MERAKI_NETWORK_TAGS env var (comma-separated)."
+            "When omitted, tags are read from data-model/firmware_targets.yml, "
+            "then from MERAKI_NETWORK_TAGS env var as a final fallback."
         ),
+    )
+    parser.add_argument(
+        "--targets-file",
+        metavar="PATH",
+        default=str(DEFAULT_TARGETS_FILE),
+        help=f"Path to firmware_targets.yml (default: {DEFAULT_TARGETS_FILE})",
     )
     args = parser.parse_args()
 
+    # Priority 1: explicit --tags flag
     tags: list[str] = args.tags or []
+
+    # Priority 2: data model network_tag fields
+    if not tags:
+        tags = _tags_from_data_model(Path(args.targets_file))
+        if tags:
+            print(f"  (tags derived from {args.targets_file}: {tags})")
+
+    # Priority 3: MERAKI_NETWORK_TAGS env var
     if not tags:
         env = os.environ.get("MERAKI_NETWORK_TAGS", "")
         tags = [t.strip() for t in env.split(",") if t.strip()]
 
     if not tags:
         parser.error(
-            "No network tags provided. Use --tags TAG [TAG ...] or set "
-            "MERAKI_NETWORK_TAGS=tag1,tag2 as an environment variable."
+            "No network tags provided. Options:\n"
+            "  1. Use --tags TAG [TAG ...]\n"
+            "  2. Populate network_tag in data-model/firmware_targets.yml\n"
+            "  3. Set MERAKI_NETWORK_TAGS=tag1,tag2 as an environment variable."
         )
     return tags
 

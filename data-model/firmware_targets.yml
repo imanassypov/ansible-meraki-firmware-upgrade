@@ -49,12 +49,12 @@ firmware_policies:
       wireless_version_id: "15763"    # MR 32.1.7  [stable]  — from playbook 1.0
 
   # Example: wireless-only policy targeting a different tag across all orgs
-  # - description: "FTD networks — wireless upgrade only"
-  #   organization: "all"
-  #   network_tag: "FTD"
-  #   upgrade_datetime: "2026-08-01T03:00:00Z"
-  #   upgrade_strategy: "minimizeUpgradeTime"   # reboot immediately at scheduled time
-  #   target:
-  #     appliance_version_id: ""
-  #     switch_version_id: ""
-  #     wireless_version_id: "15763"   # MR 32.1.7 [stable]
+  - description: "FTD networks — wireless upgrade only"
+    organization: "all"
+    network_tag: "FTD"
+    upgrade_datetime: "2026-08-01T03:00:00Z"
+    upgrade_strategy: "minimizeUpgradeTime"   # reboot immediately at scheduled time
+    target:
+      appliance_version_id: "15806"  # MX 19.2.8 [stable]
+      switch_version_id: ""
+      wireless_version_id: "15763"   # MR 32.1.7 [stable]

@@ -85,9 +85,9 @@ When you drive a car, you turn the steering wheel — you do not think about the
 
 The diagram below shows the four layers of abstraction in this repository:
 
-![IaC Abstraction Layers](images/iac-abstraction.png)
+![IaC Abstraction Layers](diagrams/iac-abstraction.png)
 
-> Diagram source: [`images/iac-abstraction.mmd`](images/iac-abstraction.mmd)
+> Diagram source: [`diagrams/iac-abstraction.mmd`](diagrams/iac-abstraction.mmd)
 
 **Layer 1 — Human Intent.** You write a YAML file, a Python script, or an Ansible playbook that expresses *what* you want in plain, readable language. You do not need to know anything about HTTP headers, JSON payloads, or API rate limits.
 
@@ -203,13 +203,11 @@ ansible-meraki-firmware-upgrade/
 │   └── workflows/
 │       └── nac-apply.yml              ← GitHub Actions: auto terraform apply on data model push
 │
-├── images/                             ← Diagrams referenced in this README
+├── diagrams/                           ← Diagrams (Mermaid PNGs + Draw.io sources)
 │   ├── iac-abstraction.png            ← IaC abstraction layer diagram
 │   ├── iac-abstraction.mmd            ← Diagram source (Mermaid)
 │   ├── repo-workflow.png              ← Data flow diagram
-│   └── repo-workflow.mmd              ← Diagram source (Mermaid)
-│
-├── diagrams/                           ← Draw.io architecture diagrams
+│   ├── repo-workflow.mmd              ← Diagram source (Mermaid)
 │   ├── 1.0-meraki-admin-logical-flow.drawio
 │   ├── 2.0-pb1-module-mapping.drawio
 │   └── 3.0-pb2-module-mapping.drawio
@@ -767,9 +765,9 @@ Both `firmware_targets.yaml` and `networks_nac.yaml` use the same `meraki:` root
 
 The data model is the *definition* of what you want your network to look like — written in YAML, stored in `data-model/`, and consumed by your automation tools. It is the bridge between human intent and machine action.
 
-![Repository Data Flow](images/repo-workflow.png)
+![Repository Data Flow](diagrams/repo-workflow.png)
 
-> Diagram source: [`images/repo-workflow.mmd`](images/repo-workflow.mmd)
+> Diagram source: [`diagrams/repo-workflow.mmd`](diagrams/repo-workflow.mmd)
 
 Think of the data model as a configuration contract: "Networks tagged `Cisco-Lab` should be running MR firmware version `15763`, with SSID `Test-WiFi` on slot 0, using WPA2 with the PSK in `MERAKI_CISCO_LAB_PSK`." Any tool that reads the contract and talks to the Meraki API will produce the same outcome.
 
@@ -1026,19 +1024,19 @@ If you update the diagram source files, regenerate the PNGs with:
 
 ```bash
 # Abstraction diagram
-mmdc -i images/iac-abstraction.mmd -o images/iac-abstraction.png --scale 3 --backgroundColor white
-/usr/bin/sips -Z 4000 images/iac-abstraction.png --out images/iac-abstraction.png
+mmdc -i diagrams/iac-abstraction.mmd -o diagrams/iac-abstraction.png --scale 3 --backgroundColor white
+/usr/bin/sips -Z 4000 diagrams/iac-abstraction.png --out diagrams/iac-abstraction.png
 
 # Data flow diagram
-mmdc -i images/repo-workflow.mmd -o images/repo-workflow.png --scale 3 --backgroundColor white
-/usr/bin/sips -Z 4000 images/repo-workflow.png --out images/repo-workflow.png
+mmdc -i diagrams/repo-workflow.mmd -o diagrams/repo-workflow.png --scale 3 --backgroundColor white
+/usr/bin/sips -Z 4000 diagrams/repo-workflow.png --out diagrams/repo-workflow.png
 ```
 
 Verify size constraints (GitHub requires: longest side ≤ 4000 px, file size ≤ 1.2 MB):
 
 ```bash
-/usr/bin/sips -g pixelWidth -g pixelHeight images/iac-abstraction.png
-ls -lh images/iac-abstraction.png
+/usr/bin/sips -g pixelWidth -g pixelHeight diagrams/iac-abstraction.png
+ls -lh diagrams/iac-abstraction.png
 ```
 
 Commit both `.mmd` source and `.png` output together.

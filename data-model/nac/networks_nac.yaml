@@ -66,3 +66,4 @@ meraki:
                     encryption_mode: "wpa"
                     wpa_encryption_mode: "WPA2 only"
                     visible: true
+

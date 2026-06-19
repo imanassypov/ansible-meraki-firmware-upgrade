@@ -818,6 +818,11 @@ See [Section 9.3](#93-the-data-model--declaring-intent) for a full explanation.
 
 ## 11. CI/CD — Automated Deployments with GitHub Actions
 
+> **For a complete, step-by-step walkthrough** of wiring GitHub to the local
+> runner — including registration, the `.env` file, a line-by-line workflow
+> explanation, the Terraform state nuance, and the real issues we hit — see the
+> dedicated guide: [`README-GITHUB-ACTIONS.md`](README-GITHUB-ACTIONS.md).
+
 ### 11.1 The Problem CI/CD Solves
 
 When you run `terraform apply` locally, the SSID change happens immediately. But what if you want changes to happen automatically whenever a team member edits the data model and pushes to Git? That is what CI/CD (Continuous Integration / Continuous Deployment) provides.

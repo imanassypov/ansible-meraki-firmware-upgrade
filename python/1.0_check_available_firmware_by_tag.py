@@ -7,12 +7,12 @@ the API key has access to, then displays current and available firmware versions
 (ID + shortName) for Appliance (MX), Switch (MS), and Wireless (MR).
 
 The Version IDs shown in the output are the exact values to copy into
-data-model/firmware_targets.yml as appliance_version_id, switch_version_id,
+data-model/firmware/firmware_targets.yaml as appliance_version_id, switch_version_id,
 and wireless_version_id when running script 2.0.
 
 Authentication
 --------------
-    export MERAKI_DASHBOARD_API_KEY=your-api-key-here
+    export MERAKI_API_KEY=your-api-key-here
 
 Optional overrides
 ------------------
@@ -20,7 +20,7 @@ Optional overrides
 
 Usage
 -----
-    # Auto-derive tags from data-model/firmware_targets.yml (recommended):
+    # Auto-derive tags from data-model/firmware/firmware_targets.yaml (recommended):
     python python/1.0_check_available_firmware_by_tag.py
 
     # Override tags explicitly on the command line:
@@ -32,7 +32,7 @@ Usage
 
 Tag resolution priority:
     1. --tags CLI flag
-    2. network_tag fields in data-model/firmware_targets.yml  (auto, no flag needed)
+    2. network_tag fields in data-model/firmware/firmware_targets.yaml  (auto, no flag needed)
     3. MERAKI_NETWORK_TAGS environment variable
 
 Mirrors: ansible/1.0_check_available_firmware_by_tag.yml
@@ -51,7 +51,7 @@ SEPARATOR = "═" * 65
 SUB_SEP   = "─" * 65
 
 DEFAULT_TARGETS_FILE = (
-    Path(__file__).resolve().parent.parent / "data-model" / "firmware_targets.yml"
+    Path(__file__).resolve().parent.parent / "data-model" / "firmware" / "firmware_targets.yaml"
 )
 
 
@@ -60,17 +60,19 @@ DEFAULT_TARGETS_FILE = (
 # ---------------------------------------------------------------------------
 
 def _tags_from_data_model(targets_file: Path) -> list[str]:
-    """Return the unique set of network_tag values from firmware_targets.yml."""
+    """Return unique tags from meraki.domains[].organizations[].networks[].tags."""
     if not targets_file.exists():
         return []
     with open(targets_file) as fh:
         data = yaml.safe_load(fh)
-    policies = (data or {}).get("firmware_policies") or []
     seen: list[str] = []
-    for p in policies:
-        tag = str(p.get("network_tag") or "").strip()
-        if tag and tag not in seen:
-            seen.append(tag)
+    for domain in (data or {}).get("meraki", {}).get("domains") or []:
+        for org in domain.get("organizations") or []:
+            for network in org.get("networks") or []:
+                for tag in network.get("tags") or []:
+                    tag = str(tag).strip()
+                    if tag and tag not in seen:
+                        seen.append(tag)
     return seen
 
 
@@ -86,7 +88,7 @@ def parse_args() -> list[str]:
         metavar="TAG",
         help=(
             "One or more network tags to filter by (case-sensitive). "
-            "When omitted, tags are read from data-model/firmware_targets.yml, "
+            "When omitted, tags are read from data-model/firmware/firmware_targets.yaml, "
             "then from MERAKI_NETWORK_TAGS env var as a final fallback."
         ),
     )
@@ -94,7 +96,7 @@ def parse_args() -> list[str]:
         "--targets-file",
         metavar="PATH",
         default=str(DEFAULT_TARGETS_FILE),
-        help=f"Path to firmware_targets.yml (default: {DEFAULT_TARGETS_FILE})",
+        help=f"Path to firmware_targets.yaml (default: {DEFAULT_TARGETS_FILE})",
     )
     args = parser.parse_args()
 
@@ -116,16 +118,16 @@ def parse_args() -> list[str]:
         parser.error(
             "No network tags provided. Options:\n"
             "  1. Use --tags TAG [TAG ...]\n"
-            "  2. Populate network_tag in data-model/firmware_targets.yml\n"
+            "  2. Add networks with tags to data-model/firmware/firmware_targets.yaml\n"
             "  3. Set MERAKI_NETWORK_TAGS=tag1,tag2 as an environment variable."
         )
     return tags
 
 
 def get_dashboard() -> meraki.DashboardAPI:
-    api_key = os.environ.get("MERAKI_DASHBOARD_API_KEY", "")
+    api_key = os.environ.get("MERAKI_API_KEY", "")
     if not api_key:
-        sys.exit("ERROR: MERAKI_DASHBOARD_API_KEY environment variable is not set.")
+        sys.exit("ERROR: MERAKI_API_KEY environment variable is not set.")
     base_url = os.environ.get("MERAKI_BASE_URL", "https://api.meraki.com/api/v1")
     return meraki.DashboardAPI(
         api_key=api_key,
@@ -250,7 +252,7 @@ def main() -> None:
 
     print(SEPARATOR)
     print(
-        "\nNext step: copy the Version IDs above into data-model/firmware_targets.yml,\n"
+        "\nNext step: copy the Version IDs above into data-model/firmware/firmware_targets.yaml,\n"
         "then run:  python python/2.0_schedule_firmware_upgrade_by_tag.py"
     )
 

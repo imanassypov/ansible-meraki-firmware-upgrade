@@ -1,0 +1,70 @@
+---
+# =============================================================================
+# firmware_targets.yaml — Desired Firmware End State (Data Model)
+# =============================================================================
+# Defines the target firmware version for each Meraki network, organized using
+# the same meraki.domains[].organizations[].networks[] hierarchy as
+# networks_nac.yaml. Playbook 2.0 and python/2.0 read this file and enforce
+# compliance — upgrading any device type that does not already match the target.
+#
+# Run playbook 1.0 (or python/1.0) to discover available version IDs, then
+# populate the version IDs in the firmware: blocks below.
+#
+# Schema reference (per network):
+#   firmware:
+#     description: string        — human-readable label shown in playbook output
+#     upgrade_datetime: string   — ISO 8601 UTC e.g. 2026-07-01T02:00:00Z
+#                                  empty string "" = next configured maintenance window
+#     upgrade_strategy: string   — optional; controls reboot behaviour:
+#                                  "minimizeClientDowntime" (default) — waits for
+#                                    client activity to drop before rebooting
+#                                  "minimizeUpgradeTime" — reboots immediately
+#                                  omit or leave empty to use Meraki default
+#     target:
+#       appliance_version_id: string  — MX target version ID (empty = do not touch)
+#       switch_version_id: string     — MS target version ID (empty = do not touch)
+#       wireless_version_id: string   — MR target version ID (empty = do not touch)
+#
+# Notes:
+#   - Networks are matched by exact name + organization name (case-sensitive).
+#   - Device families set to "" are never touched.
+#   - Version IDs are strings (quote them) — copy from playbook 1.0 output.
+# =============================================================================
+
+meraki:
+  domains:
+    - organizations:
+        - name: "Igor M"
+          networks:
+
+            # ------------------------------------------------------------------
+            # Meraki Core — tag: Cisco-Lab
+            # All device families present (MX + MS + MR).
+            # ------------------------------------------------------------------
+            - name: "Meraki Core"
+              tags:
+                - Cisco-Lab
+              firmware:
+                description: "Cisco-Lab — all device families stable firmware"
+                upgrade_datetime: ""       # "" = next maintenance window; or ISO 8601 UTC
+                upgrade_strategy: "minimizeClientDowntime"
+                target:
+                  appliance_version_id: "15806"   # MX 19.2.8  [stable]  — from playbook 1.0
+                  switch_version_id: "6016"        # MS 17.2.2  [stable]  — from playbook 1.0
+                  wireless_version_id: "15763"     # MR 32.1.7  [stable]  — from playbook 1.0
+
+            # ------------------------------------------------------------------
+            # ASUSNET — tag: FTD
+            # MX + MR present (no MS). Wireless upgrade only.
+            # ------------------------------------------------------------------
+            - name: "ASUSNET"
+              tags:
+                - FTD
+              firmware:
+                description: "FTD networks — wireless upgrade only"
+                upgrade_datetime: "2026-08-01T03:00:00Z"
+                upgrade_strategy: "minimizeUpgradeTime"   # reboot immediately at scheduled time
+                target:
+                  appliance_version_id: "15806"   # MX 19.2.8  [stable]
+                  switch_version_id: ""            # no MS devices — do not touch
+                  wireless_version_id: "15763"     # MR 32.1.7  [stable]

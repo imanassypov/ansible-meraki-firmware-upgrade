@@ -1,0 +1,67 @@
+---
+# networks.nac.yaml — Meraki Network as Code: SSID + PSK Management
+#
+# Declares SSIDs on two existing Meraki networks using the
+# netascode/nac-meraki/meraki Terraform module.
+#
+# PSK values use the !env YAML tag — they are NEVER stored in this file.
+# At runtime the NaC module substitutes each !env reference with the
+# corresponding environment variable value.
+#
+# PSK rotation workflow:
+#   Direct:  export MERAKI_CISCO_LAB_PSK=NewPassword && terraform apply
+#   Vault:   vault kv put secret/meraki/cisco-lab-ssid psk=NewPassword
+#            ./vault-envconsul.sh terraform apply
+#
+# NOTE: These networks already exist in the Meraki Dashboard. Terraform manages
+# the SSID configuration on them. On first apply, run:
+#   terraform import module.meraki.meraki_networks_wireless_ssids.this["..."] <network_id>/<ssid_number>
+# or let the module handle it — check `terraform plan` output first.
+
+meraki:
+  domains:
+    - name: "meraki.local"           # Update to match your Meraki domain name
+      administrator:
+        name: "imanassypov@gmail.com"     # Update to your Meraki admin email
+      organizations:
+        - name: "Igor M"
+          managed: false          # Org already exists — look up, do not create or manage
+          networks:
+
+            # ------------------------------------------------------------------
+            # Meraki Core — tag: Cisco-Lab
+            # All device families present (MX + MS + MR). Managing wireless only.
+            # ------------------------------------------------------------------
+            - name: "Meraki Core"
+              managed: false        # Network already exists — look up, do not create or manage
+              tags:
+                - Cisco-Lab
+              wireless:
+                ssids:
+                  - name: "Test-WiFi"
+                    ssid_number: "0"
+                    enabled: true
+                    auth_mode: "psk"
+                    psk: !env MERAKI_CISCO_LAB_PSK   # Injected at runtime — never stored
+                    encryption_mode: "wpa"
+                    wpa_encryption_mode: "WPA2 only"
+                    visible: true
+
+            # ------------------------------------------------------------------
+            # ASUSNET — tag: FTD
+            # MX + MR present (no MS). Managing wireless only.
+            # ------------------------------------------------------------------
+            - name: "ASUSNET"
+              managed: false        # Network already exists — look up, do not create or manage
+              tags:
+                - FTD
+              wireless:
+                ssids:
+                  - name: "Test-WiFi"
+                    ssid_number: "0"
+                    enabled: true
+                    auth_mode: "psk"
+                    psk: !env MERAKI_FTD_PSK          # Injected at runtime — never stored
+                    encryption_mode: "wpa"
+                    wpa_encryption_mode: "WPA2 only"
+                    visible: true

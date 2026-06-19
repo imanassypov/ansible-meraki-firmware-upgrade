@@ -22,3 +22,4 @@ __pycache__/
 
 # Nested repos — tracked separately
 nac-meraki-simple-example/
+.ansible/

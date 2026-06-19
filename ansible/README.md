@@ -108,7 +108,7 @@ ansible --version
 ansible-meraki-firmware-upgrade/
 │
 ├── data-model/
-│   └── firmware_targets.yml                    ← Desired firmware end state (edit this)
+│   └── firmware_targets.yaml                    ← Desired firmware end state (edit this)
 │
 ├── ansible/
 │   ├── README.md                               ← you are here
@@ -267,7 +267,7 @@ variable before running any playbook. The `cisco.meraki` collection checks this
 variable automatically:
 
 ```bash
-export MERAKI_DASHBOARD_API_KEY="your-actual-meraki-api-key-here"
+export MERAKI_API_KEY="your-actual-meraki-api-key-here"
 ```
 
 When the environment variable is set, you can omit `meraki_api_key` from
@@ -420,10 +420,10 @@ ansible-playbook ansible/2.0_schedule_firmware_upgrade_by_tag.yml \
 
 ### Using an environment variable instead of vault
 
-If you exported `MERAKI_DASHBOARD_API_KEY`, omit `--vault-password-file`:
+If you exported `MERAKI_API_KEY`, omit `--vault-password-file`:
 
 ```bash
-export MERAKI_DASHBOARD_API_KEY="your-key-here"
+export MERAKI_API_KEY="your-key-here"
 
 ansible-playbook ansible/1.0_check_available_firmware_by_tag.yml \
   -i ansible/inventory/meraki.yml \

@@ -1,0 +1,35 @@
+---
+# defaults.nac.yaml — Org-wide SSID defaults
+#
+# Values defined here are merged with every SSID in data/networks.nac.yaml
+# unless overridden at the network or SSID level.
+# The netascode/nac-meraki module merges defaults first, then applies
+# per-object overrides on top.
+
+defaults:
+  meraki:
+    domains:
+      organizations:
+        networks:
+          wireless:
+            ssids:
+              # SSIDs are disabled by default — must be explicitly enabled
+              # per SSID in the data model (enabled: true)
+              enabled: true
+
+              # Hidden by default — override with visible: true per SSID
+              visible: true
+
+              # NAT mode isolates wireless clients from the wired network.
+              # Override with "Bridge mode" if direct LAN access is required.
+              ip_assignment_mode: "NAT mode"
+
+              # Dual-band allows clients to connect on 2.4 GHz or 5 GHz.
+              band_selection: "Dual band operation"
+
+              # No per-client bandwidth throttling by default (0 = unlimited).
+              per_client_bandwidth_limit_up: 0
+              per_client_bandwidth_limit_down: 0
+
+              # DHCP enforcement — disabled by default.
+              mandatory_dhcp_enabled: false

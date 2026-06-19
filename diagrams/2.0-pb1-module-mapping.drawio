@@ -79,7 +79,7 @@
 
     <!-- ═══ HANDOFF ═══ -->
     <mxCell id="40"
-      value="&lt;b&gt;Handoff to Playbook 2.0&lt;/b&gt;&lt;br&gt;Operator records the desired Version IDs from playbook output and populates  data-model/firmware_targets.yml  with target version IDs, upgrade schedule, and reboot strategy"
+      value="&lt;b&gt;Handoff to Playbook 2.0&lt;/b&gt;&lt;br&gt;Operator records the desired Version IDs from playbook output and populates  data-model/firmware/firmware_targets.yaml  with target version IDs, upgrade schedule, and reboot strategy"
       style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontStyle=0;verticalAlign=middle;align=center;"
       vertex="1" parent="1">
       <mxGeometry x="15" y="521" width="750" height="52" as="geometry" />

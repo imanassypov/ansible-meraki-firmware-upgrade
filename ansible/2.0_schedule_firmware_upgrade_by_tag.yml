@@ -2,7 +2,7 @@
 # =============================================================================
 # 2.0 - Schedule Firmware Upgrade for Meraki Networks (Data Model Driven)
 # =============================================================================
-# Reads data-model/firmware_targets.yml to determine the desired firmware end
+# Reads data-model/firmware/firmware_targets.yaml to determine the desired firmware end
 # state, then enforces compliance across all matching networks.
 #
 # For each policy in the data model the playbook:
@@ -15,7 +15,7 @@
 #
 # Prerequisites:
 #   Run playbook 1.0 to discover available version IDs, then populate
-#   data-model/firmware_targets.yml with the desired target versions.
+#   data-model/firmware/firmware_targets.yaml with the desired target versions.
 #
 # Usage:
 #   ansible-playbook ansible/2.0_schedule_firmware_upgrade_by_tag.yml
@@ -30,13 +30,33 @@
   gather_facts: false
 
   vars:
-    firmware_targets_file: "{{ playbook_dir }}/../data-model/firmware_targets.yml"
+    firmware_targets_file: "{{ playbook_dir }}/../data-model/firmware/firmware_targets.yaml"
 
   pre_tasks:
 
     - name: Load firmware targets data model
       ansible.builtin.set_fact:
-        firmware_policies: "{{ (lookup('file', firmware_targets_file) | from_yaml).firmware_policies }}"
+        firmware_policies: >-
+          {%- set result = [] -%}
+          {%- set dm = lookup('file', firmware_targets_file) | from_yaml -%}
+          {%- for domain in dm.meraki.domains | default([]) -%}
+            {%- for org in domain.organizations | default([]) -%}
+              {%- for network in org.networks | default([]) -%}
+                {%- if network.firmware is defined -%}
+                  {%- set fw = network.firmware -%}
+                  {%- set _ = result.append({
+                    'networkName': network.name,
+                    'orgName': org.name,
+                    'description': fw.description | default(network.name),
+                    'upgrade_datetime': fw.upgrade_datetime | default('') | string,
+                    'upgrade_strategy': fw.upgrade_strategy | default('') | string,
+                    'target': fw.target | default({})
+                  }) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endfor -%}
+          {%- endfor -%}
+          {{ result }}
 
     - name: Validate - data model has at least one policy
       ansible.builtin.assert:
@@ -119,31 +139,17 @@
         all_networks: "{{ networks_result.results | map(attribute='meraki_response') | flatten }}"
 
     # -------------------------------------------------------------------------
-    # Step 3 — Match networks to policies
+    # Step 3 — Match networks to data model entries
     #
-    # A "policy" is one entry in firmware_targets.yml — it declares the desired
-    # firmware end state for a specific combination of org + network tag + device
-    # families. Example: "upgrade all MX/MS/MR in org 'Igor M' tagged 'Cisco-Lab'
-    # to these version IDs, at this time, with this reboot strategy."
+    # A "policy" is one network entry in firmware_targets.yaml — it declares the
+    # desired firmware end state for a specific network by exact name and org.
+    # Example: "upgrade MX/MS/MR on 'Meraki Core' in org 'Igor M' to these
+    # version IDs, at this time, with this reboot strategy."
     #
-    # This step builds a flat work list of every (network, policy) pair where:
-    #   - the network's tag list contains the policy's network_tag, AND
-    #   - the network belongs to the policy's organization (or policy says "all")
-    #
-    # One network can match multiple policies (e.g. different tags). One policy
-    # can match multiple networks. The result is a flat list of pairs — each pair
-    # is processed independently for compliance in Step 5.
-    #
-    # Example — given 2 networks and 2 policies:
-    #   Networks : "Meraki Core" (tags: Cisco-Lab), "Branch-01" (tags: Cisco-Lab, FTD)
-    #   Policies : policy-A (tag: Cisco-Lab), policy-B (tag: FTD)
-    #
-    #   Resulting work_list:
-    #   - { networkName: "Meraki Core", policy: policy-A }   ← Cisco-Lab match
-    #   - { networkName: "Branch-01",  policy: policy-A }   ← Cisco-Lab match
-    #   - { networkName: "Branch-01",  policy: policy-B }   ← FTD match
-    #                                                          (Branch-01 appears twice,
-    #                                                           once per matching policy)
+    # This step builds a flat work list of every (network, policy) pair where
+    # the API-discovered network name and org name match a data model entry
+    # exactly (case-sensitive). Each data model entry maps to at most one
+    # live network.
     # -------------------------------------------------------------------------
     - name: Build network-policy work list
       ansible.builtin.set_fact:
@@ -152,15 +158,13 @@
           {%- for network in all_networks -%}
             {%- set org_name = (meraki_orgs | selectattr('id', 'equalto', network.organizationId) | first).name -%}
             {%- for policy in firmware_policies -%}
-              {%- if policy.network_tag in (network.tags | default([])) -%}
-                {%- if policy.organization == 'all' or policy.organization == org_name -%}
-                  {%- set _ = result.append({
-                    'networkId': network.id,
-                    'networkName': network.name,
-                    'orgName': org_name,
-                    'policy': policy
-                  }) -%}
-                {%- endif -%}
+              {%- if policy.networkName == network.name and policy.orgName == org_name -%}
+                {%- set _ = result.append({
+                  'networkId': network.id,
+                  'networkName': network.name,
+                  'orgName': org_name,
+                  'policy': policy
+                }) -%}
               {%- endif -%}
             {%- endfor -%}
           {%- endfor -%}
@@ -169,8 +173,8 @@
     - name: Fail if no networks matched any policy
       ansible.builtin.fail:
         msg: >-
-          No networks matched any policy in {{ firmware_targets_file }}.
-          Check that organization names and network tags are correct
+          No networks matched any data model entry in {{ firmware_targets_file }}.
+          Check that organization names and network names are correct
           (both are case-sensitive).
       when: work_list | length == 0
 

@@ -2,7 +2,7 @@
 """
 2.0_schedule_firmware_upgrade_by_tag.py
 -----------------------------------------
-Reads data-model/firmware_targets.yml to determine the desired firmware end state,
+Reads data-model/firmware/firmware_targets.yaml to determine the desired firmware end state,
 then enforces compliance across all matching networks.
 
 For each policy in the data model the script:
@@ -15,7 +15,7 @@ For each policy in the data model the script:
 
 Authentication
 --------------
-    export MERAKI_DASHBOARD_API_KEY=your-api-key-here
+    export MERAKI_API_KEY=your-api-key-here
 
 Optional overrides
 ------------------
@@ -35,7 +35,7 @@ Usage
 Prerequisites
 -------------
     Run 1.0_check_available_firmware_by_tag.py to discover version IDs,
-    then populate data-model/firmware_targets.yml with the desired targets.
+    then populate data-model/firmware/firmware_targets.yaml with the desired targets.
 
 Mirrors: ansible/2.0_schedule_firmware_upgrade_by_tag.yml
 """
@@ -53,9 +53,9 @@ import yaml
 SEPARATOR  = "═" * 65
 SUB_SEP    = "─" * 65
 
-# Default path: ../data-model/firmware_targets.yml relative to this script.
+# Default path: ../data-model/firmware/firmware_targets.yaml relative to this script.
 DEFAULT_TARGETS_FILE = (
-    Path(__file__).resolve().parent.parent / "data-model" / "firmware_targets.yml"
+    Path(__file__).resolve().parent.parent / "data-model" / "firmware" / "firmware_targets.yaml"
 )
 
 
@@ -66,7 +66,7 @@ DEFAULT_TARGETS_FILE = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Schedule Meraki firmware upgrades based on the firmware_targets.yml "
+            "Schedule Meraki firmware upgrades based on the firmware_targets.yaml "
             "data model."
         )
     )
@@ -82,7 +82,7 @@ def parse_args() -> argparse.Namespace:
         "--targets-file",
         metavar="PATH",
         default=str(DEFAULT_TARGETS_FILE),
-        help=f"Path to firmware_targets.yml (default: {DEFAULT_TARGETS_FILE})",
+        help=f"Path to firmware_targets.yaml (default: {DEFAULT_TARGETS_FILE})",
     )
     return parser.parse_args()
 
@@ -97,11 +97,31 @@ def load_policies(targets_file: str) -> list[dict]:
         sys.exit(f"ERROR: Targets file not found: {path}")
     with open(path) as fh:
         data = yaml.safe_load(fh)
-    policies: list[dict] = (data or {}).get("firmware_policies") or []
+    policies: list[dict] = []
+    for domain in (data or {}).get("meraki", {}).get("domains") or []:
+        for org in domain.get("organizations") or []:
+            org_name = str(org.get("name") or "").strip()
+            for network in org.get("networks") or []:
+                fw = network.get("firmware")
+                if not fw:
+                    continue
+                target = fw.get("target") or {}
+                policies.append({
+                    "networkName": str(network.get("name") or "").strip(),
+                    "orgName":     org_name,
+                    "description": str(fw.get("description") or network.get("name", "")).strip(),
+                    "upgrade_datetime": str(fw.get("upgrade_datetime") or "").strip(),
+                    "upgrade_strategy": str(fw.get("upgrade_strategy") or "").strip(),
+                    "target": {
+                        "appliance_version_id": str(target.get("appliance_version_id") or "").strip(),
+                        "switch_version_id":    str(target.get("switch_version_id")    or "").strip(),
+                        "wireless_version_id":  str(target.get("wireless_version_id")  or "").strip(),
+                    },
+                })
     if not policies:
         sys.exit(
-            f"ERROR: No firmware_policies found in {path}.\n"
-            "Add at least one policy entry and re-run."
+            f"ERROR: No network firmware entries found in {path}.\n"
+            "Add at least one network entry with a firmware: block and re-run."
         )
     return policies
 
@@ -138,9 +158,9 @@ def validate_policies(policies: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 def get_dashboard() -> meraki.DashboardAPI:
-    api_key = os.environ.get("MERAKI_DASHBOARD_API_KEY", "")
+    api_key = os.environ.get("MERAKI_API_KEY", "")
     if not api_key:
-        sys.exit("ERROR: MERAKI_DASHBOARD_API_KEY environment variable is not set.")
+        sys.exit("ERROR: MERAKI_API_KEY environment variable is not set.")
     base_url = os.environ.get("MERAKI_BASE_URL", "https://api.meraki.com/api/v1")
     return meraki.DashboardAPI(
         api_key=api_key,
@@ -181,29 +201,26 @@ def build_work_list(
     policies: list[dict],
 ) -> list[dict]:
     """
-    Return a flat list of every (network, policy) pair where:
-      - the network's tag list contains the policy's network_tag  (case-sensitive), AND
-      - the network belongs to the policy's organization  (or policy.organization == 'all')
+    Return a flat list of every (network, policy) pair where the API-discovered
+    network name and org name match a data model entry exactly (case-sensitive).
 
-    One network can match multiple policies; one policy can match multiple networks.
-    The result is processed independently per pair, identical to the Ansible work_list.
+    Each data model network entry maps to at most one live network.
+    The result is processed independently per entry for compliance.
     """
     work_list: list[dict] = []
     for network in all_networks:
-        org_name  = org_by_id.get(network["organizationId"], "")
-        net_tags  = set(network.get("tags") or [])
+        org_name = org_by_id.get(network["organizationId"], "")
+        net_name = network["name"]
         for policy in policies:
-            if policy["network_tag"] in net_tags:
-                pol_org = str(policy.get("organization") or "all").strip()
-                if pol_org == "all" or pol_org == org_name:
-                    work_list.append(
-                        {
-                            "networkId":   network["id"],
-                            "networkName": network["name"],
-                            "orgName":     org_name,
-                            "policy":      policy,
-                        }
-                    )
+            if policy["networkName"] == net_name and policy["orgName"] == org_name:
+                work_list.append(
+                    {
+                        "networkId":   network["id"],
+                        "networkName": net_name,
+                        "orgName":     org_name,
+                        "policy":      policy,
+                    }
+                )
     return work_list
 
 
@@ -372,8 +389,8 @@ def main() -> None:
     work_list = build_work_list(all_networks, org_by_id, policies)
     if not work_list:
         sys.exit(
-            "\nERROR: No networks matched any policy.\n"
-            "Check that organization names and network tags are correct "
+            "\nERROR: No networks matched any data model entry.\n"
+            "Check that organization names and network names are correct "
             "(both are case-sensitive)."
         )
     print(f"\n{len(work_list)} network-policy match(es) found:")

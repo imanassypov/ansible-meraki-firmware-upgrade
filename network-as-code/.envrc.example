@@ -1,0 +1,20 @@
+# .envrc.example — copy to .envrc and populate values
+#
+# This file is committed. The real .envrc is gitignored.
+# Use `direnv allow` after creating your .envrc.
+#
+# For PSK values, prefer vault-envconsul.sh over setting them here directly.
+# See vault-envconsul.sh for Vault-based PSK injection.
+
+# --- Meraki ---
+# Dashboard API key. Found under Meraki Dashboard > Profile > API access.
+# Used by: Ansible (via vault), Python scripts, and the CiscoDevNet/meraki Terraform provider.
+export MERAKI_API_KEY=your-meraki-api-key-here
+
+# --- SSID PSKs (injected via !env in data-model/nac/networks_nac.yaml) ---
+# PSK for the Corp-WiFi SSID on Meraki Core (tag: Cisco-Lab).
+# Min 8 chars, max 64 chars, WPA2.
+export MERAKI_CISCO_LAB_PSK=your-cisco-lab-psk-here
+
+# PSK for the FTD-WiFi SSID on ASUSNET (tag: FTD).
+export MERAKI_FTD_PSK=your-ftd-psk-here

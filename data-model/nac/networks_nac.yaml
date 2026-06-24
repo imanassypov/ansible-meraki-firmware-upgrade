@@ -41,7 +41,7 @@ meraki:
                 ssids:
                   - name: "Test-WiFi"
                     ssid_number: "0"
-                    enabled: true
+                    enabled: false
                     auth_mode: "psk"
                     psk: !env MERAKI_CISCO_LAB_PSK   # Injected at runtime — never stored
                     encryption_mode: "wpa"
